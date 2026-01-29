@@ -2,11 +2,15 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 const aiService = require('../services/aiService');
-const { PrismaClient } = require('@prisma/client');
-const prisma = new PrismaClient();
+const { createClient } = require('@supabase/supabase-js');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+
+// Initialize Supabase
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_KEY;
+const supabase = createClient(supabaseUrl, supabaseKey);
 
 // Configure Multer for temp file uploads
 const upload = multer({ dest: 'uploads/' });
@@ -22,18 +26,24 @@ router.post('/analyze', upload.single('image'), async (req, res) => {
         // 1. Call AI Service
         const analysis = await aiService.analyzeCrop(req.file.path, metadata);
 
-        // 2. Mock saving to DB (User needs to run prisma migrate first)
-        // const saved = await prisma.diagnosis.create({
-        //   data: {
-        //     cropType: metadata.cropType,
-        //     growthStage: metadata.growthStage,
-        //     season: metadata.season,
-        //     location: metadata.location,
-        //     diseaseName: analysis.diseaseName,
-        //     confidence: analysis.confidence,
-        //     treatment: JSON.stringify(analysis.treatment)
-        //   }
-        // });
+        // 2. Save to Supabase
+        const { error } = await supabase
+            .from('Diagnosis')
+            .insert({
+                cropType: metadata.cropType,
+                growthStage: metadata.growthStage,
+                season: metadata.season,
+                location: metadata.location, // Optional
+                diseaseName: analysis.diseaseName,
+                confidence: parseFloat(analysis.confidence),
+                treatment: JSON.stringify(analysis.treatment),
+                // imageUrl: ... (We'd need to upload to storage first, skipping for now)
+            });
+
+        if (error) {
+            console.error("Supabase Save Error:", error);
+            // Don't fail the request if DB save fails, just log it
+        }
 
         res.json(analysis);
 
